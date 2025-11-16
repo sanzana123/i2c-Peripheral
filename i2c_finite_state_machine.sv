@@ -287,7 +287,7 @@ module i2c_finite_state_machine(
             if ((phase == 5'd0) && (bytes_internal != 4'd0))
             begin 
               read_request <= 1'b1;
-              bit_index_transmit <= 1'b1;
+              bit_index_transmit <= 3'd7;
             end
             
             else if ((phase[0] == 1'b0) && (phase < 5'd14))
@@ -302,7 +302,7 @@ module i2c_finite_state_machine(
             
             else if (phase == 5'd16)
             begin
-                sda_line_out <= 1'b0;
+                sda_line_out <= 1'b1;
             end
             
             else if (phase == 5'd17)
