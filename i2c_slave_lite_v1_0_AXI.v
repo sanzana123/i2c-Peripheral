@@ -1,6 +1,6 @@
 `timescale 1 ns / 1 ps
 
-    module  i2c_slave_lite_v1_0_AXI #
+    module  i2c_new_project_slave_lite_v1_0_AXI #
     (
         // Bit width of S_AXI address bus
         parameter integer C_S_AXI_DATA_WIDTH	= 32,
@@ -415,7 +415,7 @@
     end   
 
     
-    //edge detector for reading 
+    //edge detector for CPU and AXI bus interface: when AXI wants to read the FIFO
     reg sig_read;
     reg sig_delay_read;
     wire pe_read;
@@ -440,7 +440,7 @@
         
     assign pe_read = sig_read && ~sig_delay_read;
     
-    //edge detector for writing
+    //edge detector for CPU and AXI bus interface: when AXI wants to write to the fifo 
     reg sig_write;
     reg sig_delay_write;
     wire pe_write;
@@ -465,6 +465,21 @@
     assign pe_write = sig_write && ~sig_delay_write;
     
     wire capture_read_request;
+    reg read_request_d;
+    wire read_request_from_fsm;
+    
+    always_ff @(posedge axi_clk)
+    begin 
+      if (~axi_resetn)
+      begin
+        read_request_d <= 1'b0;
+      end 
+      else 
+      begin
+        read_request_d <= read_request_from_fsm;
+      end 
+    end
+    assign capture_read_request = read_request_from_fsm & ~read_request_d;
     
     
     //Transmit Fifo 
@@ -544,7 +559,7 @@
       .start(control_reg[7]),
       .test_out(control_reg[8]),
       .debug_out(control_reg[31:24]),
-      .read_request(capture_read_request),
+      .read_request(read_request_from_fsm),
       .clear_start_request(),
       .scl_line(scl_line),
       .sda_line_out(sda_line_out),
