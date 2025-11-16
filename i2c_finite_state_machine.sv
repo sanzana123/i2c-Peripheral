@@ -32,7 +32,7 @@ module i2c_finite_state_machine(
     
     output reg clear_start_request,
     
-    output read_request,
+    output reg read_request,
     
     //Bits of control_register - When instantiating this fsm in the axi file, in each one of their ports do, 
     input logic read_write, //read = 1, write = 0, .read_write(control_reg[0])
@@ -57,16 +57,18 @@ module i2c_finite_state_machine(
 
   always_ff @(posedge axi_clk)
   begin 
-    clock_count <= clock_count + 1; 
+    //clock_count <= clock_count + 1; 
   
     if (clock_count == 499)
     begin
-      clock_out <= 1;
+      clock_out <= 1'b1;
       clock_count <= 0;
     end
     else
-      clock_out <= 0;
-      clock_count <= clock_count + 1;
+    begin
+      clock_out <= 1'b0;
+      clock_count <= clock_count + 1'b1;
+    end
   end 
   
   assign clk200Khz = clock_out;
@@ -91,10 +93,10 @@ module i2c_finite_state_machine(
     
     reg [1:0] ack_flag;  // 0 = shifting, 1 = just finished last bit, 2 = waiting to sample
     reg ack_error;
-    reg bit_index_transmit;
+    reg [2:0] bit_index_transmit;
     logic [3:0] bytes_internal;
-
-    assign read_request = 1'b1;
+    
+    
     
     
     //logic drive_sda_out;
@@ -127,7 +129,9 @@ module i2c_finite_state_machine(
         ack_flag <= 2'd1;
         
         sda_line_out <= 1'b1;   // released by default
-        bit_index <= 3'd7;   
+        bit_index <= 3'd7;  
+        bit_index_transmit <= 3'd7;
+ 
       end
      // else 
 //      begin
@@ -145,6 +149,16 @@ module i2c_finite_state_machine(
         // increment the phase at every state and as you transition from one state to another, make the phase 0
         
         //start <= 1'b1;
+        read_request <= 1'b0;
+        phase <= phase + 1;
+        
+        case (state)
+          IDLE, START, SEND_STOP:
+             scl_line <= 1'b1;             // Keep SCL high in these states
+
+          SEND_DEVICE_ADDRESS, SEND_REGISTER_ADDRESS, TRANSMIT_DATA:
+             scl_line <= phase[0];         
+        endcase
         
         case (state)
           IDLE:
@@ -166,7 +180,8 @@ module i2c_finite_state_machine(
           begin 
             bit_index <= 3'd7;
             ack_flag <= 2'd0;
-            scl_line <= 1'b1;
+           // scl_line <= 1'b1;
+            clear_start_request <= 1'b0;
             sda_line_out <= 1'b0;
             if (phase == 3'd3)
             begin
@@ -178,11 +193,11 @@ module i2c_finite_state_machine(
           SEND_DEVICE_ADDRESS:
           begin
             // Write data 
-            scl_line <= ~ scl_line;
+         //   scl_line <= ~ scl_line;
             
-            if ((scl_line == 1'b0) && (phase % 2 == 0) && (phase <= 5'd14))
+            if ((phase[0] == 1'b0) && (phase <= 5'd14))
             begin 
-              phase <= phase + 1'b1;
+              //phase <= phase + 1'b1;
               
               sda_line_out <= (complete_device_address[bit_index]== 1'b1)? 1'b1: 1'b0;
               if (bit_index != 3'd0)
@@ -193,13 +208,13 @@ module i2c_finite_state_machine(
             
             else if (phase == 5'd16)
             begin
-              phase <= phase + 1'b1;
+              //phase <= phase + 1'b1;
               sda_line_out <= 1'b1;
             end
             
             else if (phase == 5'd17)
             begin
-              phase <= 1'b0;
+              //phase <= 1'b0;
               if (sda_line_in == 1'b0)
               begin
                 ack_error <= 1'b0;
@@ -207,12 +222,12 @@ module i2c_finite_state_machine(
                 
                 if (use_register)
                 begin
-                  
+                  phase <= 1'b0;
                   state <= SEND_REGISTER_ADDRESS;
                 end 
                 else
                 begin
-                  
+                  phase <= 1'b0;
                   state <= TRANSMIT_DATA;
                 end 
               end
@@ -220,7 +235,7 @@ module i2c_finite_state_machine(
               begin
                 ack_error <= 1'b1;
                 state <= IDLE;
-                
+                phase <= 1'b0;
               end 
             end 
             
@@ -229,10 +244,10 @@ module i2c_finite_state_machine(
           
           SEND_REGISTER_ADDRESS:
           begin
-            scl_line <= ~ scl_line;
-            if ((phase % 2 == 0) && (phase <= 5'd14))
+        //    scl_line <= ~ scl_line;
+            if ((phase[0] == 1'b0) && (phase <= 5'd14))
             begin
-              phase <= phase + 1'b1;
+              //phase <= phase + 1'b1;
               
               sda_line_out <= (register_reg[bit_index]== 1'b1)? 1'b1: 1'b0;
               if (bit_index != 3'd0)
@@ -243,7 +258,7 @@ module i2c_finite_state_machine(
             
             else if(phase == 5'd16)
             begin
-              phase <= phase + 1'b1;
+              //phase <= phase + 1'b1;
               sda_line_out <= 1'b1;
             end
             
@@ -267,37 +282,50 @@ module i2c_finite_state_machine(
           
           TRANSMIT_DATA:
           begin
-            scl_line <= ~ scl_line;
+          //  scl_line <= ~ scl_line;
             
-            if ((read_request) && (phase % 2 == 0) && (phase < 5'd14))
+            if ((phase == 5'd0) && (bytes_internal != 4'd0))
             begin 
-              sda_line_out <= (data_from_fifo[bit_index_transmit]== 1'b1)? 1'b1: 1'b0;
-              if (bytes_internal != 3'd0)
-              begin
-                bytes_internal <= bytes_internal - 3'b1;
-                bit_index_transmit <= bit_index_transmit - 1'b1;
-              end
+              read_request <= 1'b1;
+              bit_index_transmit <= 1'b1;
             end
             
-            else if (phase == 5'd16)
+            else if ((phase[0] == 1'b0) && (phase < 5'd14))
             begin 
-              sda_line_out <= 1'b1;
+              sda_line_out <= data_from_fifo[bit_index_transmit];
+
+              if (bit_index_transmit != 3'd0)
+              begin
+                  bit_index_transmit <= bit_index_transmit - 3'd1;
+              end
             end 
+            
+            else if (phase == 5'd16)
+            begin
+                sda_line_out <= 1'b0;
+            end
             
             else if (phase == 5'd17)
             begin
               if (sda_line_in == 1'b0)
-              begin 
+              begin
                 ack_error <= 1'b0;
-                bit_index <= 3'd7;
-                state <= TRANSMIT_DATA;
                 phase <= 1'b0;
-              end 
+                
+                if (bytes_internal != 4'd0)
+                begin 
+                  bytes_internal <= bytes_internal - 4'd1;
+                end
+                else 
+                begin
+                  state <= SEND_STOP;
+                end
+              end
               else 
               begin 
                 ack_error <= 1'b1;
                 state <= IDLE;
-                phase <= 1'b0;
+                phase <= 5'b0;
               end 
             end
           end 
@@ -307,18 +335,18 @@ module i2c_finite_state_machine(
             if (phase == 1'b0)
             begin 
               scl_line <= 1'b0;
-              phase <= 1'b1;
+              //phase <= 1'b1;
             end 
             
             else if(phase == 1'b1)
             begin
               scl_line <= 1'b1;
-              phase <= 2'b01;
+              //phase <= 2'b01;
             end
             else if (phase == 2'b01)
             begin 
               sda_line_out <= 1'b1;
-              phase <= 1'b0;
+              //phase <= 1'b0;
               state <= IDLE;
             end 
             //drive_scl <= 1'b1;
