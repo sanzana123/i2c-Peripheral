@@ -335,19 +335,21 @@ module i2c_finite_state_machine(
             if (phase == 1'b0)
             begin 
               scl_line <= 1'b0;
-              //phase <= 1'b1;
+              sda_line_out <= 1'b0;
             end 
             
             else if(phase == 1'b1)
             begin
               scl_line <= 1'b1;
-              //phase <= 2'b01;
+              sda_line_out <= 1'b0;
             end
             else if (phase == 2'b01)
             begin 
               sda_line_out <= 1'b1;
-              //phase <= 1'b0;
+              scl_line <= 1'b1;
               state <= IDLE;
+              status_reg[7] <= 1'b0;
+              phase <= 1'b0;
             end 
             //drive_scl <= 1'b1;
             //drive_sda_out <= 1'b1;
