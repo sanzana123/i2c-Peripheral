@@ -220,7 +220,7 @@
     logic test_out;
     logic [7:0] debug_interface;
     
-    logic clear_start_request;
+    reg clear_start_request;
     
     
     
@@ -280,17 +280,22 @@
                                 // When you write the C program, specify which registers and which bits to work on 
                                 
                                 control_reg <= S_AXI_WDATA[31:0];
-                                
-                                if (clear_start_request)
-                                begin
-                                  control_reg[7] <= 1'b0;
-                                end 
                             end
                                  
                 endcase
+                
             end
             else
+            begin
                 clear_overflow_transmit <= 1'b0;
+                //clear_overflow_transmit <= 1'b0;
+                clear_overflow_receive <= 1'b0;
+                
+                if (clear_start_request)
+                begin 
+                  control_reg[7] <= 1'b0;
+                end 
+            end
                 
             
         end
@@ -481,6 +486,23 @@
     end
     assign capture_read_request = read_request_from_fsm & ~read_request_d;
     
+    wire capture_write_request;
+    reg write_request_d;
+    wire write_request_from_fsm;
+    
+    always_ff @(posedge axi_clk)
+    begin
+      if (~axi_resetn)
+      begin
+        write_request_d <= 1'b0;
+      end
+      else 
+      begin 
+        write_request_d <= write_request_from_fsm;
+      end 
+    end 
+    assign capture_write_request = write_request_from_fsm & ~write_request_d;
+    
     
     //Transmit Fifo 
     fifo instantiation_tx (
@@ -522,7 +544,7 @@
       
       .wr_data(),
       
-      .wr_request(),
+      .wr_request(capture_write_request),
       
       //.wr_request(pe_write && (waddr[4:2] == DATA_REG)),
 
@@ -551,6 +573,7 @@
       .address_reg(address_reg),
       .register_reg(register_reg),
       .data_from_fifo(data_from_bus_to_fifo),
+      .data_to_fifo(data_to_bus_from_fifo),
       .status_reg(status_reg),
       .read_write(control_reg[0]),
       .byte_count(control_reg[4:1]),
@@ -560,7 +583,8 @@
       .test_out(control_reg[8]),
       .debug_out(control_reg[31:24]),
       .read_request(read_request_from_fsm),
-      .clear_start_request(),
+      .write_request(write_request_from_fsm), 
+      .clear_start_request(clear_start_request),
       .scl_line(scl_line),
       .sda_line_out(sda_line_out),
       .sda_line_in(sda_line_in)
