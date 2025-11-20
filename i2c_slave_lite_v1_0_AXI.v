@@ -471,7 +471,7 @@
     
     wire capture_read_request;
     reg read_request_d;
-    wire read_request_from_fsm;
+    reg read_request_from_fsm;
     
     always_ff @(posedge axi_clk)
     begin 
@@ -488,7 +488,7 @@
     
     wire capture_write_request;
     reg write_request_d;
-    wire write_request_from_fsm;
+    reg write_request_from_fsm;
     
     always_ff @(posedge axi_clk)
     begin
@@ -503,6 +503,10 @@
     end 
     assign capture_write_request = write_request_from_fsm & ~write_request_d;
     
+    logic [7:0] data_to_fifo_from_fsm;
+    logic [7:0] data_from_fifo_to_fsm;
+
+    
     
     //Transmit Fifo 
     fifo instantiation_tx (
@@ -510,14 +514,15 @@
       
       .reset(~axi_resetn),
       
-      .wr_data(data_from_bus_to_fifo & 8'hFF),
+      .wr_data(data_from_bus_to_fifo & 8'hFF), // CPU WRITES TO TRANSMIT FIFO ON WRITE REQUEST
       
       .wr_request(pe_write && (axi_awaddr[4:2] == DATA_REG)),
       
       //.wr_request(pe_write && (waddr[4:2] == DATA_REG)),
 
       ///////////////////////////////////////////
-      .rd_data(data_to_bus_from_fifo),
+      //.rd_data(data_from_fifo_to_fsm),       // FSM READS FROM TRANSMIT FIFO ON READ REQUEST
+      .rd_data(data_from_fifo_to_fsm),
       
       //.rd_request(pe_read && (raddr[4:2] == DATA_REG)),
       .rd_request(capture_read_request),
@@ -542,14 +547,14 @@
       
       .reset(~axi_resetn),
       
-      .wr_data(),
+      .wr_data(data_to_fifo_from_fsm), //FSM WRITES TO THE RECEIVE FIFO ON WRITE REQUEST 
       
       .wr_request(capture_write_request),
       
       //.wr_request(pe_write && (waddr[4:2] == DATA_REG)),
 
       ///////////////////////////////////////////
-      .rd_data(data_to_bus_from_fifo),
+      .rd_data(data_to_bus_from_fifo), //CPU READS FROM RECEIVE FIFO ON READ REQUEST
       
       .rd_request(pe_read && (raddr[4:2] == DATA_REG)),
       
@@ -566,14 +571,16 @@
       .rd_index()
     ); 
     
+    
     // fsm instantiation 
     i2c_finite_state_machine i2c_finite_state_machine_instantiation (
       .axi_clk(S_AXI_ACLK),
       .axi_resetn(S_AXI_ARESETN),
       .address_reg(address_reg),
       .register_reg(register_reg),
-      .data_from_fifo(data_from_bus_to_fifo),
-      .data_to_fifo(data_to_bus_from_fifo),
+      //.data_from_fifo(data_from_fifo_to_fsm), //Linux -> Transmit Fifo -> FSM
+      .data_from_fifo(data_from_fifo_to_fsm),
+      .data_to_fifo(data_to_fifo_from_fsm), // 
       .status_reg(status_reg),
       .read_write(control_reg[0]),
       .byte_count(control_reg[4:1]),
