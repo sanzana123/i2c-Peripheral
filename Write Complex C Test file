@@ -1,0 +1,207 @@
+// Write to registers and read from registers of your i2c module 
+#include <stdio.h>
+#include <stdint.h>          // uint32_t
+#include <stdbool.h>         // bool
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>           // open
+#include <sys/mman.h>        // mmap
+#include <unistd.h>          // close
+
+#include "address_map_i2c.h" // AXI4_LITE_BASE, I2C_BASE_OFFSET
+#include "i2c_regs.h"        // OFS_* and SPAN_IN_BYTES
+
+// ------------------------
+// Control register layout
+// ------------------------
+// control_reg[0]     = read_write     (1 = read, 0 = write)
+// Write to registers and read from registers of your i2c module 
+#include <stdio.h>
+#include <stdint.h>          // uint32_t
+#include <stdbool.h>         // bool
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>           // open
+#include <sys/mman.h>        // mmap
+#include <unistd.h>          // close
+
+#include "address_map_i2c.h" // AXI4_LITE_BASE, I2C_BASE_OFFSET
+#include "i2c_regs.h"        // OFS_* and SPAN_IN_BYTES
+
+// ------------------------
+// Control register layout
+// ------------------------
+// control_reg[0]     = read_write     (1 = read, 0 = write)
+// control_reg[4:1]   = byte_count
+// control_reg[5]     = use_register
+// control_reg[6]     = use_repeated_start
+// control_reg[7]     = start
+// control_reg[8]     = test_out
+
+// Bit positions of Control Register
+#define CONTROL_REG_READ_WRITE_POS          0
+#define CONTROL_REG_BYTE_COUNT_LSB          1
+#define CONTROL_REG_USE_REGISTER_POS        5
+#define CONTROL_REG_USE_REPEATED_START_POS  6
+#define CONTROL_REG_START_POS               7
+#define CONTROL_REG_TEST_OUT_POS            8
+
+// Single-bit masks for Control Register bits 
+#define CONTROL_REG_READ_WRITE        (1u << CONTROL_REG_READ_WRITE_POS)
+#define CONTROL_REG_USE_REGISTER      (1u << CONTROL_REG_USE_REGISTER_POS)
+#define CONTROL_REG_USE_REPEATED_START (1u << CONTROL_REG_USE_REPEATED_START_PO
+S)
+#define CONTROL_REG_START             (1u << CONTROL_REG_START_POS)
+#define CONTROL_REG_TEST_OUT          (1u << CONTROL_REG_TEST_OUT_POS)
+
+// Field mask for byte_count (bits 4:1) of Control Register 
+#define CONTROL_REG_BYTE_COUNT_MASK   (0xFu << CONTROL_REG_BYTE_COUNT_LSB)
+
+// Bit Positions of Status Register 
+#define STATUS_REG_RX_FIFO_OVERFLOW_POS 0
+#define STATUS_REG_RX_FIFO_FULL_POS 1
+#define STATUS_REG_RX_FIFO_EMPTY_POS 2
+#define STATUS_REG_TX_FIFO_OVERFLOW_POS 3
+#define STATUS_REG_TX_FIFO_FULL_POS 4 
+#define STATUS_REG_TX_FIFO_EMPTY_POS 5
+#define STATUS_REG_ACK_ERROR_POS 6
+#define STATUS_REG_BUSY_BIT_POS 7
+
+//Signle Bit Masks for Status Regsiter 
+#define RX_FIFO_OVERFLOW     (1u << STATUS_REG_RX_FIFO_OVERFLOW_POS)
+#define RX_FIFO_FULL         (1u << STATUS_REG_RX_FIFO_FULL_POS)
+#define RX_FIFO_EMPTY        (1u << STATUS_REG_RX_FIFO_EMPTY_POS)
+#define TX_FIFO_OVERFLOW     (1u << STATUS_REG_TX_FIFO_OVERFLOW_POS)
+#define TX_FIFO_FULL         (1u << STATUS_REG_TX_FIFO_FULL_POS)
+#define TX_FIFO_EMPTY        (1u << STATUS_REG_TX_FIFO_EMPTY_POS)
+#define ACK_ERROR            (1u << STATUS_REG_ACK_ERROR_POS)
+#define BUSY_BIT             (1u << STATUS_REG_BUSY_BIT_POS)
+
+
+#define IODIR_REG   0x00
+#define GPIO_REG    0x09
+#define OLAT_REG    0x0A
+
+volatile uint32_t *base = NULL;
+
+
+bool gpioOpen(void)
+{
+    int file = open("/dev/mem", O_RDWR | O_SYNC);
+    if (file < 0)
+    {
+        perror("open /dev/mem failed");
+        return false;
+    }
+
+    base = mmap(NULL, SPAN_IN_BYTES, PROT_READ | PROT_WRITE, MAP_SHARED, file, 
+AXI4_LITE_BASE + I2C_BASE_OFFSET);
+
+    close(file);
+
+    if (base == MAP_FAILED)
+    {
+        perror("mmap failed");
+        base = NULL;
+        return false;
+    }
+
+    return true;
+}
+
+
+static void write_to_i2c_bus(uint32_t device_address,
+                             uint32_t registerAddress,
+                             uint32_t dataValue)
+{
+    printf("About to start writing...\n");
+
+    
+    base[OFS_ADDRESS_REG]  = (device_address & 0x7F);   // 7-bit addr in [6:0]
+    base[OFS_REGISTER_REG] = (registerAddress & 0xFF);  // register addr
+    base[OFS_DATA_REG]     = (dataValue & 0xFF);        // data byte
+
+
+    printf(" AXI ADDRESS_REG  = 0x%08X\n", base[OFS_ADDRESS_REG]);
+    printf(" AXI REGISTER_REG = 0x%08X\n", base[OFS_REGISTER_REG]);
+    printf(" AXI DATA_REG     = 0x%08X\n", base[OFS_DATA_REG]);    
+    uint32_t ctrl = base[OFS_CONTROL_REG];
+
+    
+    ctrl &= ~CONTROL_REG_READ_WRITE;
+
+    
+    ctrl &= ~CONTROL_REG_BYTE_COUNT_MASK;                              // clear
+ field
+    ctrl |= ((1u & 0xFu) << CONTROL_REG_BYTE_COUNT_LSB);               // set f
+ield
+
+    
+    ctrl |= CONTROL_REG_USE_REGISTER;
+
+
+    ctrl &= ~CONTROL_REG_USE_REPEATED_START;
+
+
+    ctrl |= CONTROL_REG_START;
+
+    base[OFS_CONTROL_REG] = ctrl;
+
+
+    printf("CONTROL_REG = 0x%08X\n", base[OFS_CONTROL_REG]);
+}
+
+void read_from_i2c_status_register()
+{
+    
+    uint32_t status_reg;
+    
+    do
+    {
+        status_reg = base[OFS_STATUS_REG];
+    } while (status_reg & BUSY_BIT);
+    
+    printf("STATUS REGISTER Value: 0x%08X\n", status_reg);
+    
+    // Decode ALL the bits for debugging
+    printf(" RXFO (bit0):        %d\n", (status_reg >> 0) & 1);
+    printf(" RXFF (bit1):        %d\n", (status_reg >> 1) & 1);
+    printf(" RXFE (bit2):        %d\n", (status_reg >> 2) & 1);
+    printf(" TXFO (bit3):        %d\n", (status_reg >> 3) & 1);
+    printf(" TXFF (bit4):        %d\n", (status_reg >> 4) & 1);
+    printf(" TXFE (bit5):        %d\n", (status_reg >> 5) & 1);
+    printf(" ACK_ERROR (bit6):   %d\n", (status_reg >> 6) & 1);
+    printf(" BUSY (bit7):        %d\n", (status_reg >> 7) & 1);
+
+    
+    
+
+}
+
+
+
+int main(void)
+{
+    if (!gpioOpen())
+    {
+        printf("Failed to open GPIO / I2C memory map\n");
+        return 1;
+    }
+
+    
+    
+    uint32_t dev_addr = 0x20;
+    uint8_t storeStatusRegValue = 0;
+
+    write_to_i2c_bus(dev_addr, IODIR_REG, 0x00);
+    
+    read_from_i2c_status_register();
+    
+    write_to_i2c_bus(dev_addr, GPIO_REG, 0xFF);
+   // write_to_i2c_bus(dev_addr, OLAT_REG, 0xFF);
+
+
+    
+    // If the busy bit of status_reg is cleared, start another transaction 
+    return 0;
+}
