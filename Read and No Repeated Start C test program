@@ -1,0 +1,102 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#include "address_map_i2c.h"
+#include "i2c_regs.h"
+
+// Control Register bit positions
+#define CONTROL_REG_READ_WRITE_POS          0
+#define CONTROL_REG_BYTE_COUNT_LSB          1
+#define CONTROL_REG_USE_REGISTER_POS        5
+#define CONTROL_REG_USE_REPEATED_START_POS  6
+#define CONTROL_REG_START_POS               7
+
+#define CONTROL_REG_BYTE_COUNT_MASK (0xF << CONTROL_REG_BYTE_COUNT_LSB)
+#define READ_MODE  1
+#define WRITE_MODE 0
+
+// MCP23008 Registers
+#define IODIR_REG 0x00
+#define GPIO_REG  0x09
+#define GPPU_REG  0x06
+
+volatile uint32_t *base = NULL;
+
+bool gpioOpen(void)
+{
+    int fd = open("/dev/mem", O_RDWR | O_SYNC);
+    if (fd < 0) return false;
+
+    base = mmap(NULL, SPAN_IN_BYTES, PROT_READ|PROT_WRITE, MAP_SHARED,
+                fd, AXI4_LITE_BASE + I2C_BASE_OFFSET);
+    close(fd);
+    return (base != MAP_FAILED);
+}
+
+void i2c_write_reg(uint8_t dev, uint8_t reg, uint8_t value)
+{
+    base[OFS_ADDRESS_REG]  = dev & 0x7F;
+    base[OFS_REGISTER_REG] = reg;
+    base[OFS_DATA_REG]     = value;
+
+    uint32_t ctrl = 0;
+    ctrl |= (WRITE_MODE << CONTROL_REG_READ_WRITE_POS);
+    ctrl |= (1 << CONTROL_REG_USE_REGISTER_POS);
+    ctrl |= (1 << CONTROL_REG_START_POS);
+    ctrl |= ((1 & 0xF) << CONTROL_REG_BYTE_COUNT_LSB);
+
+    base[OFS_CONTROL_REG] = ctrl;
+
+    while (base[OFS_STATUS_REG] & (1<<7));  // busy bit
+}
+
+uint8_t i2c_read_reg(uint8_t dev, uint8_t reg)
+{
+    // 1. Write device-address + register
+    base[OFS_ADDRESS_REG]  = dev & 0x7F;
+    base[OFS_REGISTER_REG] = reg;
+
+    uint32_t ctrl = 0;
+    ctrl |= (READ_MODE << CONTROL_REG_READ_WRITE_POS);
+    ctrl |= (1 << CONTROL_REG_USE_REGISTER_POS);
+    ctrl |= (1 << CONTROL_REG_START_POS);
+    ctrl |= ((1 & 0xF) << CONTROL_REG_BYTE_COUNT_LSB);
+
+    base[OFS_CONTROL_REG] = ctrl;
+
+    // wait until read completes
+    while (base[OFS_STATUS_REG] & (1<<7));
+
+    return base[OFS_DATA_REG] & 0xFF;
+}
+
+int main(void)
+{
+    if (!gpioOpen()) {
+        printf("Failed to open memory map\n");
+        return 1;
+    }
+
+    uint8_t dev = 0x20;   // MCP23008 address with A2,A1,A0 = 000
+
+    // 1. GP1 as input
+    i2c_write_reg(dev, IODIR_REG, 0x02);
+
+    // 2. GP1 pull-up enabled
+    i2c_write_reg(dev, GPPU_REG, 0x02);
+
+    // 3. Read GPIO
+    uint8_t raw = i2c_read_reg(dev, GPIO_REG);
+
+    uint8_t button = (raw >> 1) & 0x01;
+   // printf("Button state: %d\n", button);
+   printf("Raw GPIO: 0x%02X\n", raw);
+   printf("Button state: %d\n", button);
+
+
+    return 0;
+}
